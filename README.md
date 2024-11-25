@@ -99,8 +99,11 @@ fun log() {
 }
 ```
 
+---
 
+## Changelog
 
-
-
-
+### Submission for stage 2
+- Changes regarding SD-JWT format
+- Support having not only one key used by passing keyId's to functions which require keys to align with changes made in applet
+- SecureElementWrapper: Improve reader selection and channel handling

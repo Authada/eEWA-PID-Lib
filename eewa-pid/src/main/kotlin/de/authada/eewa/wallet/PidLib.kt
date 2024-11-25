@@ -17,14 +17,20 @@
 package de.authada.eewa.wallet
 
 import android.util.Log
+import com.google.gson.JsonParser
 import de.authada.eewa.secure_element.NoResponseException
 import de.authada.eewa.secure_element.SecureElementClosedException
 import de.authada.eewa.secure_element.SecureElementWrapper
+import de.authada.eewa.secure_element.Util.concat
+import de.authada.eewa.secure_element.Util.intToBytes
+import de.authada.eewa.secure_element.applet.AppletConstants
 import de.authada.eewa.secure_element.applet.AppletConstants.SW_NO_DATA_STORED
 import de.authada.eewa.secure_element.applet.AppletConstants.SW_PIN_ONE_TRY_LEFT
 import de.authada.eewa.secure_element.applet.AppletConstants.SW_PIN_TWO_TRIES_LEFT
 import de.authada.eewa.secure_element.applet.AppletConstants.SW_SUCCESS
 import de.authada.eewa.secure_element.applet.AppletConstants.SW_WALLET_BLOCKED
+import de.authada.eewa.secure_element.applet.AppletConstants.keyidTag
+import de.authada.eewa.secure_element.applet.AppletConstants.signatureDataTag
 import de.authada.eewa.secure_element.applet.CommandBuilder
 import de.authada.eewa.secure_element.toHexString
 import org.bouncycastle.jce.interfaces.ECPublicKey
@@ -40,6 +46,22 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
         private const val maxSignatureDataSize: Int = 3072
 
         private val commandBuilder = CommandBuilder()
+
+        private val sdjwtAddressAttributeList = listOf(
+            SDJWTFieldName.noPlaceInfo.fieldName,
+            SDJWTFieldName.freeTextPlace.fieldName,
+            SDJWTFieldName.streetAddress.fieldName,
+            SDJWTFieldName.locality.fieldName,
+            SDJWTFieldName.postalCode.fieldName,
+            SDJWTFieldName.country.fieldName
+        )
+
+        private val sdjwtPobAttributeList = listOf(
+            SDJWTFieldName.placeOfBirthNoPlaceInfo.fieldName,
+            SDJWTFieldName.placeOfBirthFreeTextPlace.fieldName,
+            SDJWTFieldName.placeOfBirthLocality.fieldName,
+            SDJWTFieldName.placeOfBirthCountry.fieldName
+        )
     }
 
     @Throws(SecureElementClosedException::class)
@@ -121,48 +143,66 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
         return ecPublicKey
     }
 
-    private fun getDevicePublicKeyHex(): ByteArray {
-        val name = "getDevicePublicKey"
-        val getDevicePkCommand = commandBuilder.createGetDevicePK()
+    private fun getPublicKeyHex(keyId: ByteArray): ByteArray {
+        val name = "getPublicKey"
+        val getDevicePkCommand = commandBuilder.createGetPublicKey(keyId)
         var devicePublicKeyBytArray = secureElementWrapper.pureTransmit(getDevicePkCommand, name)
 
         return responseOrThrow(devicePublicKeyBytArray, name)
     }
 
-    fun getDevicePublicKey(): ECPublicKey {
-        val devicePublicKeyHex = getDevicePublicKeyHex()
+    fun getPublicKey(keyId: ByteArray): ECPublicKey {
+        val publicKeyHex = getPublicKeyHex(keyId)
 
-        Log.d(tag, "devicePKHex " + devicePublicKeyHex.toHexString())
+        Log.d(tag, "PKHex " + publicKeyHex.toHexString())
 
-        return EcPublicKeyPrime256V1Creator.fromHexW(devicePublicKeyHex)
+        return EcPublicKeyPrime256V1Creator.fromHexW(publicKeyHex)
     }
 
-    fun signWithDevKey(nonce: ByteArray): ByteArray {
-        val name = "signWithDevKey"
+    fun signWithKey(keyId: ByteArray, dataToSign: ByteArray): ByteArray {
+        val name = "signWithKey"
+
+        val keyIdPart = concat(intToBytes( keyidTag), byteArrayOf(0x00), intToBytes(keyId.size), keyId)
+        val dataToSignPart = intToBytes(signatureDataTag)
+        val fixedSize = keyIdPart.size + dataToSignPart.size + 2
 
         val dataList = mutableListOf<ByteArray>()
 
-        if (nonce.size > maxSignatureDataSize) {
-            val numberOfParts = nonce.size / maxSignatureDataSize
+        if (dataToSign.size + fixedSize > maxSignatureDataSize) {
+            val numberOfParts = (dataToSign.size + fixedSize) / maxSignatureDataSize
+
             var fromIndex = 0
-            var toIndex = maxSignatureDataSize
+            var toIndex = maxSignatureDataSize - fixedSize
             for (i in 0 .. numberOfParts) {
-                dataList.add(i, nonce.copyOfRange(fromIndex, toIndex))
+                val rangedData = dataToSign.copyOfRange(fromIndex, toIndex)
+                if (i == 0) {
+                    val data = concat(keyIdPart, dataToSignPart, intToBytes(rangedData.size), rangedData)
+                    dataList.add(i, data)
+                } else {
+                    dataList.add(i, rangedData)
+                }
                 if (i != numberOfParts) {
                     fromIndex = toIndex
-                    toIndex = if (nonce.size - ((i + 1) * maxSignatureDataSize) > maxSignatureDataSize) {
+                    toIndex = if (dataToSign.size - ((i + 1) * maxSignatureDataSize) > maxSignatureDataSize) {
                         toIndex + maxSignatureDataSize
                     } else {
-                        toIndex + (nonce.size - ((i + 1) * maxSignatureDataSize))
+                        toIndex + (dataToSign.size - ((i + 1) * maxSignatureDataSize)) + fixedSize
                     }
                 }
             }
         } else {
-            dataList.add(nonce)
+            var lengthOfData = intToBytes(dataToSign.size)
+            if (lengthOfData.size == 1) {
+                lengthOfData = byteArrayOf(0x00.toByte(), lengthOfData[0])
+            }
+            val data = concat(keyIdPart, dataToSignPart, lengthOfData, dataToSign)
+            val command = commandBuilder.createSignWithKey(AppletConstants.insCreateSignatureWithKeySingle, data)
+            val response = secureElementWrapper.pureTransmit(command, name)
+            return responseOrThrow(response, name)
         }
 
         dataList.forEachIndexed { index, bytes ->
-            val command = commandBuilder.createSignWithDevKey(bytes, index != dataList.size - 1)
+            val command = commandBuilder.createSignWithKey(AppletConstants.insCreateSignatureWithKey, bytes, index != dataList.size - 1)
             val response = secureElementWrapper.pureTransmit(command, name)
             val responseOrThrow = responseOrThrow(response, name)
             if (index == dataList.size - 1) {
@@ -174,11 +214,13 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
     }
 
     private fun getPoPAndWalletAttestation(
-        authenticationCcPublicKey: ECPublicKey, nonce: ByteArray
+        authenticationCcPublicKey: ECPublicKey,
+        keyId: ByteArray,
+        nonce: ByteArray
     ): DeviceKeyAttestation {
         val name = "getPopWalletAttestation"
 
-        val getPopWalletAttestation = commandBuilder.createPopAndAttestation(nonce)
+        val getPopWalletAttestation = commandBuilder.createPopAndAttestation(keyId, nonce)
         val response = secureElementWrapper.pureTransmit(getPopWalletAttestation, name)
 
         val lengthOfProofOfPossession = Integer.decode(
@@ -214,27 +256,28 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
 
         Log.d(tag, "walletAttestation ${walletAttestation.toHexString()}")
 
-        val devicePublicKeyByteArray = getDevicePublicKeyHex()
+        val publicKeyByteArray = getPublicKeyHex(keyId)
         Log.d(
-            tag, "devicePKHex " + devicePublicKeyByteArray.toHexString()
+            tag, "PKHex " + publicKeyByteArray.toHexString()
         )
 
-        val ecDevicePublicKey = EcPublicKeyPrime256V1Creator.fromHexW(devicePublicKeyByteArray)
+        val ecPublicKey = EcPublicKeyPrime256V1Creator.fromHexW(publicKeyByteArray)
 
         val ellipticCurve256Verify = SignatureChecker.ellipticCurve256Verify(
-            ecDevicePublicKey, nonce, proofOfPossession
+            ecPublicKey, nonce, proofOfPossession
         )
         Log.d(tag, "verified?: $ellipticCurve256Verify")
 
         val ellipticCurve256VerifyForWA = SignatureChecker.ellipticCurve256Verify(
-            authenticationCcPublicKey, devicePublicKeyByteArray, walletAttestation
+            authenticationCcPublicKey, publicKeyByteArray, walletAttestation
         )
         Log.d(tag, "verified?: $ellipticCurve256VerifyForWA")
 
         deleteObjects()
 
         return DeviceKeyAttestation(
-            ecDevicePublicKey,
+            ecPublicKey,
+            keyId,
             authenticationCcPublicKey,
             walletAttestation,
             proofOfPossession,
@@ -243,7 +286,25 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
 
     fun walletAttestation(nonce: ByteArray): DeviceKeyAttestation {
         val authenticationPublicKey = getAuthenticationPublicKey()
-        return getPoPAndWalletAttestation(authenticationPublicKey, nonce)
+
+        val keyId = createKeyPair()
+        return getPoPAndWalletAttestation(authenticationPublicKey, keyId, nonce)
+    }
+
+    fun createKeyPair(): ByteArray {
+        val name = "createKeyPair"
+
+        val createKeyPairCommand = commandBuilder.createKeyPair()
+        val pureTransmit = secureElementWrapper.pureTransmit(createKeyPairCommand, name)
+        return responseOrThrow(pureTransmit, name)
+    }
+
+    fun deleteKeyId(keyId: ByteArray) {
+        val name = "deleteKeyId"
+
+        val deleteKeyIdCommand = commandBuilder.deleteKeyId(keyId)
+        val pureTransmit = secureElementWrapper.pureTransmit(deleteKeyIdCommand, name)
+        Log.d(tag, pureTransmit.toHexString())
     }
 
     private fun removeStartingZeros(byteArray: ByteArray): ByteArray {
@@ -253,17 +314,17 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
         return byteArray
     }
 
-    fun storePersonalData(personalData: ByteArray): ByteArray {
-        val storeDataInApplet = storeDataInApplet(personalData)
+    fun storePersonalData(keyId: ByteArray, personalData: ByteArray): ByteArray {
+        val storeDataInApplet = storeDataInApplet(keyId, personalData)
         deleteObjects()
 
         return storeDataInApplet
     }
 
-    private fun storeDataInApplet(personalData: ByteArray): ByteArray {
+    private fun storeDataInApplet(keyId: ByteArray, personalData: ByteArray): ByteArray {
         val name = "storePersonalData"
 
-        val createHmac = commandBuilder.createPersonalData(personalData)
+        val createHmac = commandBuilder.createPersonalData(keyId, personalData)
         val pureTransmit = secureElementWrapper.pureTransmit(createHmac, name)
 
         return responseOrThrow(pureTransmit, name)
@@ -272,8 +333,8 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
     fun isPinSet(): Boolean {
         val name = "createHasPin"
 
-        val createHmac = commandBuilder.createHasPin()
-        val pureTransmit = secureElementWrapper.transmit(createHmac, name)
+        val createPin = commandBuilder.createHasPin()
+        val pureTransmit = secureElementWrapper.transmit(createPin, name)
 
         val response = responseOrThrow(pureTransmit, name)
         return (response.isEmpty())
@@ -292,10 +353,10 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
         cr: ByteArray,
         nonce: ByteArray,
         auditor: String,
-        selector: List<PersonalData>
+        selector: List<String>
     ): Pid {
         deleteObjects()
-        val response = createPidInApplet(publicKey, cr, nonce, auditor, selector)
+        val response = createPidInApplet(publicKey, cr, nonce, auditor, getSelectorList(selector))
         deleteObjects()
         return Pid(response)
     }
@@ -334,6 +395,20 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
         return responseOrThrow(pureTransmit, name)
     }
 
+    private fun getSelectorList(selector: List<String>): List<PersonalData> =
+        selector.flatMap { s ->
+            PersonalData.entries.filter {
+                if (s != "address" && s != "place_of_birth") {
+                    it.attributeName.contentEquals(
+                        s, true
+                    )
+                } else {
+                    s == "address" && it.attributeName.startsWith("address.")
+                            || s == "place_of_birth" && it.attributeName.startsWith("place_of_birth.")
+                }
+            }
+        }
+
     fun getPersonalData(cr: ByteArray): Map<String, ByteArray>? {
         val name = "getPersonalData"
 
@@ -352,7 +427,7 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
 
     private fun getPersonalDataMap(rawPersonalData: ByteArray): Map<String, ByteArray>? = try {
         val byteBuffer = ByteBuffer.wrap(rawPersonalData)
-        buildMap {
+        val map = buildMap {
             while (byteBuffer.remaining() > 0) {
                 val tag = byteBuffer.getShort().toUShort().toInt()
                 val length = byteBuffer.getShort().toUShort().toInt()
@@ -365,10 +440,45 @@ class PidLib(private val secureElementWrapper: SecureElementWrapper) {
                     this.put(it.attributeName, it.converter(value))
                 }
             }
+        }.toMutableMap()
+
+        if (map.keys.any { it in sdjwtAddressAttributeList }) {
+
+            val country = map[SDJWTFieldName.country.fieldName]?.let { convert(it) }
+            val locality = map[SDJWTFieldName.locality.fieldName]?.let { convert(it) }
+            val postalCode = map[SDJWTFieldName.postalCode.fieldName]?.let { convert(it) }
+            val streetAddress = map[SDJWTFieldName.streetAddress.fieldName]?.let { convert(it) }
+
+            val formatted = "{\"country\":\"${country}\", \"locality\":\"${locality}\", \"postal_code\":\"${postalCode}\", \"street_address\":\"${streetAddress}\"}"
+
+            map["address"] = formatted.toByteArray(Charsets.UTF_8)
+            map.remove(PersonalData.streetAddress.attributeName)
+            map.remove(PersonalData.locality.attributeName)
+            map.remove(PersonalData.postalCode.attributeName)
+            map.remove(PersonalData.country.attributeName)
         }
+
+        if (map.keys.any { it in sdjwtPobAttributeList }) {
+            val locality = map[SDJWTFieldName.placeOfBirthFreeTextPlace.fieldName]?.let { convert(it) } ?: map[SDJWTFieldName.placeOfBirthLocality.fieldName]?.let { convert(it) }
+            val country = map[SDJWTFieldName.placeOfBirthCountry.fieldName]?.let { convert(it) }
+
+            val formatted = "{\"locality\":\"${locality}\"${country?.let { "\"country\":\${country}\" }" } ?: ""}}"
+
+            map["place_of_birth"] = formatted.toByteArray(Charsets.UTF_8)
+            map.remove(PersonalData.placeOfBirthLocality.attributeName)
+            map.remove(PersonalData.placeOfBirthCountry.attributeName)
+        }
+
+        map["issuing_country"] = "D".toByteArray(Charsets.UTF_8)
+        map["issuing_authority"] = "D".toByteArray(Charsets.UTF_8)
+
+        map
     } catch (e: Exception) {
         Log.d(tag, "Error parsing raw personal data to map: ${e.message}")
         null
     }
+
+    private fun convert(data: ByteArray): String =
+        JsonParser.parseString(data.decodeToString()).asString
 
 }

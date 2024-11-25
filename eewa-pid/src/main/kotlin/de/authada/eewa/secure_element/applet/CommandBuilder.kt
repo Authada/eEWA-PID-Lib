@@ -16,11 +16,12 @@
 
 package de.authada.eewa.secure_element.applet
 
-import android.util.Log
 import de.authada.eewa.secure_element.Util.concat
+import de.authada.eewa.secure_element.Util.intToBytes
 import de.authada.eewa.secure_element.applet.AppletConstants.dataExtendedSizeMin
+import de.authada.eewa.secure_element.applet.AppletConstants.keyidTag
 import de.authada.eewa.secure_element.applet.AppletConstants.maximumLe
-import de.authada.eewa.secure_element.decodeHex
+import de.authada.eewa.secure_element.applet.AppletConstants.nonceTag
 
 class CommandBuilder {
     fun createVerifyPin(pin: IntArray): ByteArray = byteArrayOf(
@@ -67,16 +68,6 @@ class CommandBuilder {
             else -> throw IllegalArgumentException("SIZE NOT Valid")
         }
 
-    private fun intToBytes(i: Int): ByteArray {
-        var hexLength = Integer.toHexString(i)
-        if (hexLength.length % 2 == 1) {
-            hexLength = "0$hexLength"
-        }
-        Log.d("WALLETLOG", "HexLength: $hexLength")
-
-        return hexLength.decodeHex()
-    }
-
 
     fun createSetPinCommand(pin: IntArray): ByteArray = byteArrayOf(
         AppletConstants.cla,
@@ -100,65 +91,106 @@ class CommandBuilder {
         0x00.toByte()
     )
 
-    fun createGetDevicePK(): ByteArray = byteArrayOf(
-        AppletConstants.cla,
-        AppletConstants.insGetDevicePK,
-        AppletConstants.p1,
-        AppletConstants.p2,
-        0x00.toByte()
-    )
-
-    fun createSignWithDevKey(nonce: ByteArray, splitted: Boolean = false): ByteArray {
-        val begin = byteArrayOf(
-            if (splitted) AppletConstants.claChained else AppletConstants.cla,
-            AppletConstants.insCreateSignatureWithDeviceKey,
-            AppletConstants.p1,
-            AppletConstants.p2
-        )
-
-        val bytesLengthCommand = intToBytes(nonce.size)
-        val extendedLengthData = nonce.isExtendedLengthData()
-
-        return concat(
-            begin,
-            if (extendedLengthData) elLengthCommandBuilder(bytesLengthCommand) else bytesLengthCommand,
-            nonce,
-            if (extendedLengthData) elLengthExpectedBuilder(byteArrayOf(maximumLe)) else byteArrayOf(maximumLe)
-        )
-    }
-
-    fun createPopAndAttestation(nonce: ByteArray): ByteArray {
+    fun createGetPublicKey(keyId: ByteArray): ByteArray {
         val begin = byteArrayOf(
             AppletConstants.cla,
-            AppletConstants.insPopAndAttestation,
+            AppletConstants.insGetPublicKey,
             AppletConstants.p1,
             AppletConstants.p2
         )
-        val bytesLengthCommand = intToBytes(nonce.size)
 
         return concat(
             begin,
-            bytesLengthCommand,
-            nonce,
+            intToBytes(keyId.size),
+            keyId,
             byteArrayOf(maximumLe)
         )
     }
 
-    fun createPersonalData(personalData: ByteArray): ByteArray {
+    fun createSignWithKey(ins: Byte, data: ByteArray, splitted: Boolean = false): ByteArray {
         val begin = byteArrayOf(
-            AppletConstants.cla,
-            AppletConstants.insCreatePersonalData,
+            if (splitted) AppletConstants.claChained else AppletConstants.cla,
+            ins,
             AppletConstants.p1,
             AppletConstants.p2
         )
 
-        val bytesLengthCommand = intToBytes(personalData.size)
-        val extendedLengthData = personalData.isExtendedLengthData()
+        val bytesLengthCommand = intToBytes(data.size)
+        val extendedLengthData = data.isExtendedLengthData()
 
         return concat(
             begin,
             if (extendedLengthData) elLengthCommandBuilder(bytesLengthCommand) else bytesLengthCommand,
-            personalData,
+            data,
+            if (extendedLengthData) elLengthExpectedBuilder(byteArrayOf(maximumLe)) else byteArrayOf(maximumLe)
+        )
+    }
+
+    fun createPopAndAttestation(keyId: ByteArray, nonce: ByteArray): ByteArray {
+        val begin = byteArrayOf(
+            AppletConstants.cla,
+            AppletConstants.insWalletAttestation,
+            AppletConstants.p1,
+            AppletConstants.p2
+        )
+
+        val keyIdPart = concat(intToBytes(keyidTag), byteArrayOf(0x00), intToBytes(keyId.size), keyId)
+        val noncePart = concat(intToBytes(nonceTag), byteArrayOf(0x00), intToBytes(nonce.size), nonce)
+
+        val body = concat(keyIdPart, noncePart)
+        val bytesLengthCommand = intToBytes(body.size)
+
+        return concat(
+            begin,
+            bytesLengthCommand,
+            body,
+            byteArrayOf(maximumLe)
+        )
+    }
+
+    fun createKeyPair(): ByteArray =
+        byteArrayOf(
+            AppletConstants.cla,
+            AppletConstants.insCreateKeyPair,
+            AppletConstants.p1,
+            AppletConstants.p2,
+            maximumLe
+        )
+
+    fun deleteKeyId(keyId: ByteArray): ByteArray {
+        val begin = byteArrayOf(
+            AppletConstants.cla,
+            AppletConstants.insDeleteKeyId,
+            AppletConstants.p1,
+            AppletConstants.p2
+        )
+
+        return concat(
+            begin,
+            intToBytes(keyId.size),
+            keyId,
+            byteArrayOf(maximumLe)
+        )
+    }
+
+
+    fun createPersonalData(keyId: ByteArray, personalData: ByteArray): ByteArray {
+        val begin = byteArrayOf(
+            AppletConstants.cla,
+            AppletConstants.insStorePersonalData,
+            AppletConstants.p1,
+            AppletConstants.p2
+        )
+
+        val keyIdPart = concat(intToBytes(keyidTag), byteArrayOf(0x00), intToBytes(keyId.size), keyId)
+        val body = concat(keyIdPart, personalData)
+        val bytesLengthCommand = intToBytes(body.size)
+        val extendedLengthData = body.isExtendedLengthData()
+
+        return concat(
+            begin,
+            if (extendedLengthData) elLengthCommandBuilder(bytesLengthCommand) else bytesLengthCommand,
+            body,
             if (extendedLengthData) elLengthExpectedBuilder(byteArrayOf(maximumLe)) else byteArrayOf(maximumLe)
         )
     }

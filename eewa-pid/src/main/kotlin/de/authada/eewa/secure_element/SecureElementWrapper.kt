@@ -51,47 +51,44 @@ class SecureElementWrapper(private val secureElementCallback: SecureElementCallb
 
         readers?.let {
             Log.d(tag, "reader da")
-            for (reader in readers) {
-                if (reader != null && reader.name.startsWith("eSE")) {
-                    eSE = reader
-                }
+            eSE = readers.firstOrNull { reader ->
+                reader.name.startsWith(ESE_TAG) || reader.name.startsWith(SIM_TAG)
             }
-        }
-        if (eSE == null) {
-            secureElementCallback.onConnectionCouldntBeEstablished("Kein Secure Element")
         }
 
         eSE?.let {
             Log.d(tag, "eSE da")
 
             it.openChannel()
-        }
+        } ?: secureElementCallback.onConnectionCouldntBeEstablished("Kein Secure Element")
     }
 
     private fun Reader.openChannel() {
         try {
             session = openSession()
             ch = session!!.openLogicalChannel(fidesmoAppletAid)
-            Log.d(tag, "Session open")
+
+            ch?.let { channel ->
+                Log.d(tag, "Session open")
+                channel.selectResponse?.let { it1 ->
+                    val responseString = it1.toHexString()
+                    Log.d(tag, responseString)
+                    if (responseString.startsWith("90")) {
+                        secureElementCallback.onConnected()
+                    } else {
+                        secureElementCallback.onConnectionCouldntBeEstablished("Channel wurde nicht aufgebaut")
+                    }
+                }
+            } ?: secureElementCallback.onConnectionCouldntBeEstablished("Channel wurde nicht gefunden")
         } catch (e: SecurityException) {
             e.message?.let { it2 ->
                 Log.d(tag, "Error")
                 Log.d(tag, it2)
                 secureElementCallback.onConnectionCouldntBeEstablished("TBASIC: $it2")
             }
-        }
-        if (ch != null) {
-            ch?.selectResponse?.let { it1 ->
-                val responseString = it1.toHexString()
-                Log.d(tag, responseString)
-                if (responseString.startsWith("90")) {
-                    secureElementCallback.onConnected()
-                } else {
-                    secureElementCallback.onConnectionCouldntBeEstablished("Channel wurde nicht aufgebaut")
-                }
-            }
-        } else {
-            secureElementCallback.onConnectionCouldntBeEstablished("Channel wurde nicht gefunden")
+        } catch(e: Exception) {
+            Log.d(tag, "Error: ${e.message ?: "unknown error"}")
+            secureElementCallback.onConnectionCouldntBeEstablished("Error: ${e.message ?: "unknown error"}")
         }
     }
 
@@ -116,7 +113,7 @@ class SecureElementWrapper(private val secureElementCallback: SecureElementCallb
                 it is SecureElementClosedException ||
                 it is IOException ||
                 it is IllegalStateException
-                ) {
+            ) {
                 eSE?.openChannel()
             }
             trySend(command, name)
@@ -127,8 +124,9 @@ class SecureElementWrapper(private val secureElementCallback: SecureElementCallb
         ch?.let {
             if (it.isOpen) {
                 val response = it.transmit(command)
-                Log.d(tag, "$name Response: ${response.toHexString()}")
+                Log.d(tag, name + " Response: ${response.toHexString()}")
                 return response
+
             } else {
                 throw SecureElementClosedException()
             }
@@ -141,5 +139,10 @@ class SecureElementWrapper(private val secureElementCallback: SecureElementCallb
 
     fun freeResources() {
         eSE?.closeSessions()
+    }
+
+    companion object {
+        private const val ESE_TAG: String = "eSE"
+        private const val SIM_TAG: String = "SIM"
     }
 }

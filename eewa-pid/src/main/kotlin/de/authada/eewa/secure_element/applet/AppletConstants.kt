@@ -21,15 +21,18 @@ object AppletConstants {
     const val claChained = 0x94.toByte()
     const val insVerifyPin = 0x20.toByte()
     const val insDeleteTransients = 0x35.toByte()
-    const val insPopAndAttestation = 0x39.toByte()
-    const val insCreatePersonalData = 0x42.toByte()
+    const val insCreateKeyPair = 0x36.toByte()
+    const val insWalletAttestation = 0x39.toByte()
+    const val insStorePersonalData = 0x42.toByte()
     const val insCreatePid = 0x43.toByte()
     const val insGetAuthenticationPK = 0x45.toByte()
-    const val insGetDevicePK = 0x46.toByte()
     const val insSetPin = 0x51.toByte()
+    const val insGetPublicKey = 0x52.toByte()
+    const val insDeleteKeyId = 0x53.toByte()
     const val insCleanUp = 0x71.toByte()
-    const val insCreateSignatureWithDeviceKey = 0x72.toByte()
     const val insCreateHasPin = 0x73.toByte()
+    const val insCreateSignatureWithKey = 0x74.toByte()
+    const val insCreateSignatureWithKeySingle = 0x75.toByte()
     const val insGetPersonalData = 0x44.toByte()
 
     const val p1 = 0x00.toByte()
@@ -37,6 +40,11 @@ object AppletConstants {
 
     const val maximumLe = 0x00.toByte()
     const val dataExtendedSizeMin = 256
+
+    //tags
+    const val keyidTag: Int = 0xD001
+    const val signatureDataTag: Int = 0xD002
+    const val nonceTag: Int = 0xD003
 
     //status words
     const val SW_WALLET_BLOCKED: String = "63C0"

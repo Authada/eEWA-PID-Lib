@@ -23,25 +23,20 @@ enum class PersonalData(
     val attributeName: String,
     val converter: (ByteArray) -> ByteArray
 ) {
-    givenName(0xC001, "given_name", ::string),
-    familyName(0xC002, "family_name", ::string),
-    birthDate(0xC003, "birth_date", ::string),
-    sourceDocumentType(0xC004, "source_document_type", ::string),
-    dateOfExpiry(0xC005, "expiry_date", ::string),
-    academicTitle(0xC006, "academic_title", ::string),
-    streetAddress(0xC007, "resident_street", ::string),
-    locality(0xC008, "resident_city", ::string),
-    postalCode(0xC009, "resident_postal_code", ::string),
-    country(0xC00A, "resident_country", ::string),
-    noPlaceInfo(0xC00B, "resident_address", ::string),
-    freeTextPlace(0xC00C, "resident_address", ::string),
-    nationality(0xC00D, "nationality", ::string),
-    birthFamilyName(0xC00E, "family_name_birth", ::string),
-    placeOfBirthLocality(0xC00F, "birth_city", ::string),
-    placeOfBirthCountry(0xC010, "birth_country", ::string),
-    placeOfBirthNoPlaceInfo(0xC011, "birth_address", ::string),
-    placeOfBirthFreeTextPlace(0xC012, "birth_address", ::string),
-    alsoKnownAs(0xC013, "also_known_as", ::string);
-
+    givenName(0xC001, SDJWTFieldName.givenName.fieldName, ::string),
+    familyName(0xC002, SDJWTFieldName.familyName.fieldName, ::string),
+    birthDate(0xC003, SDJWTFieldName.birthDate.fieldName, ::string),
+    sourceDocumentType(0xC004, SDJWTFieldName.sourceDocumentType.fieldName, ::string),
+    dateOfExpiry(0xC005, SDJWTFieldName.dateOfExpiry.fieldName, ::string),
+    academicTitle(0xC006, SDJWTFieldName.academicTitle.fieldName, ::string),
+    streetAddress(0xC007, SDJWTFieldName.streetAddress.fieldName, ::string),
+    locality(0xC008, SDJWTFieldName.locality.fieldName, ::string),
+    postalCode(0xC009, SDJWTFieldName.postalCode.fieldName, ::string),
+    country(0xC00A, SDJWTFieldName.country.fieldName, ::string),
+    nationality(0xC00D, SDJWTFieldName.nationality.fieldName, ::string),
+    birthFamilyName(0xC00E, SDJWTFieldName.birthFamilyName.fieldName, ::string),
+    placeOfBirthLocality(0xC00F, SDJWTFieldName.placeOfBirthLocality.fieldName, ::string),
+    placeOfBirthCountry(0xC010, SDJWTFieldName.placeOfBirthCountry.fieldName, ::string),
+    alsoKnownAs(0xC013, SDJWTFieldName.alsoKnownAs.fieldName, ::string);
 }
 fun string(data: ByteArray): ByteArray = JsonPrimitive(data.toString(Charsets.UTF_8)).toString().toByteArray(Charsets.UTF_8)

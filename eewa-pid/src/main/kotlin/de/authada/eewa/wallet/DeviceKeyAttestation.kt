@@ -20,6 +20,7 @@ import java.security.PublicKey
 
 data class DeviceKeyAttestation(
     val devicePublicKey: PublicKey,
+    val devicePublicKeyKeyId: ByteArray,
     val authenticationPublicKey: PublicKey,
     val keyAttestation: ByteArray,
     val deviceKeyPop: ByteArray

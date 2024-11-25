@@ -16,6 +16,7 @@
 
 package de.authada.eewa.secure_element
 
+import android.util.Log
 import java.io.ByteArrayOutputStream
 
 object Util {
@@ -23,5 +24,15 @@ object Util {
         val out = ByteArrayOutputStream()
         arrays.forEach { out.write(it) }
         return out.toByteArray()
+    }
+
+    fun intToBytes(i: Int): ByteArray {
+        var hexLength = Integer.toHexString(i)
+        if (hexLength.length % 2 == 1) {
+            hexLength = "0$hexLength"
+        }
+        Log.d("WALLETLOG", "HexLength: $hexLength")
+
+        return hexLength.decodeHex()
     }
 }
